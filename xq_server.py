@@ -1,8 +1,24 @@
-import http.server, socketserver, json, subprocess, threading
+import http.server, socketserver, json, subprocess, threading, urllib.request, urllib.parse
 
 ENGINE = "/opt/xq/pikafish"
 WD = "/opt/xq"
 PORT = 8090
+
+def query_cloud(fen):
+    try:
+        url = "http://www.chessdb.cn/chessdb.php?action=queryall&board=" + urllib.parse.quote(fen)
+        r = urllib.request.urlopen(url, timeout=8).read().decode("utf-8", "ignore").strip()
+        if r.startswith("move:"):
+            first = r.split("|")[0]
+            d = {}
+            for kv in first.split(","):
+                if ":" in kv:
+                    k, v = kv.split(":", 1)
+                    d[k] = v
+            return d.get("move"), d.get("score"), d.get("winrate")
+    except Exception:
+        pass
+    return None, None, None
 
 class Engine:
     def __init__(self):
@@ -10,8 +26,8 @@ class Engine:
                                   stdout=subprocess.PIPE, text=True, bufsize=1)
         self.lock = threading.Lock()
         self._wait("uci", "uciok")
-        self._send("setoption name Threads value 4")
-        self._send("setoption name Hash value 512")
+        self._send("setoption name Threads value 5")
+        self._send("setoption name Hash value 1024")
         self._wait("isready", "readyok")
 
     def _send(self, c):
@@ -25,7 +41,7 @@ class Engine:
             if not line or line.strip().startswith(token):
                 break
 
-    def analyze(self, fen, movetime=4000):
+    def engine_go(self, fen, movetime):
         with self.lock:
             self._send("ucinewgame")
             self._send("position fen " + fen)
@@ -46,6 +62,13 @@ class Engine:
                     break
             return best, score
 
+    def analyze(self, fen, movetime=4000):
+        mv, sc, wr = query_cloud(fen)
+        if mv:
+            return mv, sc or "", wr or "", "cloud"
+        best, score = self.engine_go(fen, movetime)
+        return best, score, "", "engine"
+
 engine = Engine()
 
 HTML = r'''<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
@@ -55,7 +78,8 @@ HTML = r'''<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
 body{margin:0;background:linear-gradient(160deg,#11131c,#1c2233);color:#e6eaf5;font-family:system-ui,-apple-system,sans-serif;text-align:center}
 #wrap{max-width:500px;margin:0 auto;padding:8px}
-h2{margin:10px 0 6px;font-size:19px;letter-spacing:1px}
+h2{margin:10px 0 2px;font-size:19px;letter-spacing:1px}
+.ver{color:#6fae8a;font-size:12px;margin-bottom:6px}
 canvas{border-radius:12px;width:100%;height:auto;touch-action:none;box-shadow:0 6px 24px rgba(0,0,0,.5)}
 .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:8px 0}
 button{flex:1;min-width:72px;padding:12px 6px;border:0;border-radius:10px;background:#39456a;color:#fff;font-size:15px;font-weight:600;transition:.1s}
@@ -69,11 +93,14 @@ button:active{transform:scale(.96)}
 #out{margin:8px 0;padding:14px;background:#222842;border-radius:10px;font-size:16px;min-height:26px;line-height:1.6}
 .hint{color:#8a93b0;font-size:13px;margin-top:4px}
 b.bm{color:#4ade80;font-size:18px}
+.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:13px;margin-left:6px}
+.tc{background:#1e4620;color:#7ee08a}.te{background:#2a3656;color:#9bc2ff}
 </style></head><body><div id="wrap">
 <h2>🐟 皮卡鱼象棋助手</h2>
+<div class="ver">引擎 Pikafish 2026-01-02　｜　☁️ 云库已接入　｜　顶配</div>
 <canvas id="b"></canvas>
 <div id="turn" class="red" onclick="toggleTurn()">● 轮到 <span id="tn">红方</span> 走　(点我切换)</div>
-<div id="bar">思考 <span id="mtv">4</span> 秒<input id="mt" type="range" min="1" max="20" value="4" oninput="document.getElementById('mtv').textContent=this.value"></div>
+<div id="bar">本地思考 <span id="mtv">4</span> 秒<input id="mt" type="range" min="1" max="20" value="4" oninput="document.getElementById('mtv').textContent=this.value"></div>
 <div class="row">
 <button class="go" onclick="analyze()">🐟 分析最优</button>
 <button class="mv" onclick="playBest()">➡️ 走最优</button>
@@ -173,7 +200,7 @@ document.getElementById('warn').textContent=(wk===1&&bk===1)?'':'⚠️ 棋盘�
 }
 async function analyze(){
 chk();best=null;sel=null;draw();
-document.getElementById('out').textContent='🐟 皮卡鱼思考中...';
+document.getElementById('out').textContent='🐟 查云库 + 皮卡鱼思考中...';
 try{
 const res=await fetch('/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
 body:JSON.stringify({fen:genFEN(),movetime:(+document.getElementById('mt').value)*1000})});
@@ -181,10 +208,17 @@ const d=await res.json();
 if(!d.bestmove||d.bestmove==='(none)'){document.getElementById('out').textContent='⚠️ 没算出着法,检查局面/轮到谁是否摆对';return;}
 bestUci=d.bestmove;best=uci2rc(d.bestmove);
 const fp=board[best.fr][best.fc];const nm=fp?NAME[fp]:'?';
-let sc=d.score||'',txt='';
-if(sc.startsWith('mate')){const n=sc.split(' ')[1];txt=(+n>0?'🔥 '+Math.abs(n)+' 步绝杀!':'💀 '+Math.abs(n)+'步被杀');}
+let src=d.source==='cloud'?'<span class="tag tc">☁️云库</span>':'<span class="tag te">🖥️本地引擎</span>';
+let txt='';
+if(d.source==='cloud'){
+if(d.winrate) txt='胜率 '+d.winrate+'%　';
+if(d.score) txt+='评分 '+d.score+' (正=该走方占优)';
+}else{
+let sc=d.score||'';
+if(sc.startsWith('mate')){const n=sc.split(' ')[1];txt=(+n>0?'🔥 '+Math.abs(n)+' 步绝杀!':'💀 '+Math.abs(n)+' 步被杀');}
 else if(sc.startsWith('cp')){const v=+sc.split(' ')[1];txt=(v>0?'优势 +':'劣势 ')+v;}
-document.getElementById('out').innerHTML='🐟 最优:<b class="bm">'+nm+' '+d.bestmove+'</b><br>'+txt+'<div class="hint">绿箭头就是要走的棋,可点「走最优」自动走</div>';
+}
+document.getElementById('out').innerHTML='🐟 最优:<b class="bm">'+nm+' '+d.bestmove+'</b>'+src+'<br>'+txt+'<div class="hint">绿箭头就是要走的棋,可点「走最优」自动走</div>';
 draw();
 }catch(e){document.getElementById('out').textContent='❌ 连服务器失败:'+e;}
 }
@@ -196,7 +230,7 @@ lastMove={fr:best.fr,fc:best.fc,tr:best.tr,tc:best.tc};
 best=null;turn=turn==='w'?'b':'w';updTurn();draw();
 document.getElementById('out').textContent='✅ 已走最优。换对手走了,对手走完你摆上,再分析。';
 }
-function updTurn(){const t=document.getElementById('turn');document.getElementById('tn').textContent=turn==='w'?'红方':'黑方';t.className=turn==='w'?'red':'blk';t.firstChild.textContent=turn==='w'?'● 轮到 ':'● 轮到 ';}
+function updTurn(){const t=document.getElementById('turn');document.getElementById('tn').textContent=turn==='w'?'红方':'黑方';t.className=turn==='w'?'red':'blk';t.firstChild.textContent='● 轮到 ';}
 function toggleTurn(){turn=turn==='w'?'b':'w';best=null;updTurn();draw();}
 function reset(){board=JSON.parse(JSON.stringify(START));turn='w';sel=null;lastMove=null;best=null;hist=[];updTurn();draw();document.getElementById('out').textContent='已摆回开局。';document.getElementById('warn').textContent='';}
 function flip(){flipped=!flipped;draw();}
@@ -223,10 +257,10 @@ class H(http.server.BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", 0))
             try:
                 data = json.loads(self.rfile.read(n) or b"{}")
-                best, score = engine.analyze(data.get("fen", ""), int(data.get("movetime", 4000)))
-                out = json.dumps({"bestmove": best, "score": score}).encode()
+                best, score, winrate, source = engine.analyze(data.get("fen", ""), int(data.get("movetime", 4000)))
+                out = json.dumps({"bestmove": best, "score": score, "winrate": winrate, "source": source}).encode()
             except Exception as e:
-                out = json.dumps({"bestmove": None, "score": "", "err": str(e)}).encode()
+                out = json.dumps({"bestmove": None, "score": "", "winrate": "", "source": "", "err": str(e)}).encode()
             self._send(200, out, "application/json")
         else:
             self._send(404, b"404", "text/plain")
@@ -237,5 +271,5 @@ class H(http.server.BaseHTTPRequestHandler):
 class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
-print("皮卡鱼象棋助手已启动,访问 http://<服务器IP>:%d" % PORT)
+print("皮卡鱼象棋助手(顶配:云库+5线程+1G哈希)已启动,访问 http://<服务器IP>:%d" % PORT)
 TS(("0.0.0.0", PORT), H).serve_forever()
