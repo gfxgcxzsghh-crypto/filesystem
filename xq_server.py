@@ -20,6 +20,10 @@ def query_cloud(fen):
         pass
     return None, None, None
 
+def piece_count(fen):
+    # 数棋盘上还有多少个子(FEN 第一段里的字母个数)
+    return sum(1 for ch in fen.split(" ", 1)[0] if ch.isalpha())
+
 class Engine:
     def __init__(self):
         self.p = subprocess.Popen([ENGINE], cwd=WD, stdin=subprocess.PIPE,
@@ -63,10 +67,13 @@ class Engine:
             return best, score
 
     def analyze(self, fen, movetime=4000):
-        mv, sc, wr = query_cloud(fen)
-        if mv:
-            return mv, sc or "", wr or "", "cloud"
-        best, score = self.engine_go(fen, movetime)
+        # 残局(<=12 子)云库基本等于残局库,精确,优先用;
+        # 开局 + 中局一律让皮卡鱼深算(至少 6 秒),不信云库的浅着法
+        if piece_count(fen) <= 12:
+            mv, sc, wr = query_cloud(fen)
+            if mv:
+                return mv, sc or "", wr or "", "cloud"
+        best, score = self.engine_go(fen, max(movetime, 6000))
         return best, score, "", "engine"
 
 engine = Engine()
