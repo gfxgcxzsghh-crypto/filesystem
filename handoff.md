@@ -17,15 +17,16 @@
 
 ## 1. FiveM 游戏服(ESX Legacy + Overextended/ox 生态)
 
-- **txAdmin** 管理面板
+- **txAdmin** 管理面板,服务端目录 `/opt/jiutian_new`,cfg 在 `/opt/jiutian_new/server.cfg`,资源在 `/opt/jiutian_new/resources`
 - 曾出过数据库故障(MySQL root 密码不匹配 → 全资源变红),已修复
   - 教训:改 `mysql_connection_string` 这类 **convar 必须完整重启 txAdmin** 才生效(`restart oxmysql` 没用)
 - **安全红线**:FiveM 调 AI 的 key 在 `server.cfg` 用 `set`,**绝不能用 `setr`**(setr 会把密钥暴露给所有客户端)
 - **已装的自制资源**:
   - `jt_repairbot` —— 自动维修
   - `jt_fun` —— 欢乐包:`/tpm` 传送标记点、`/firework` 烟花、`/superjump` 超级跳、`/dice` 骰子、`/coinflip` 抛硬币(结果全服广播)
-- **原则**:拒绝任何盗版/破解 FiveM 资源(后门风险高)
-- **待办**:管理员反应 919 面板功能无法使用(还没排查)
+- **原则**:拒绝任何盗版/破解 FiveM 资源(后门风险高)—— 见第 6 节的后门扫描器
+- ✅ **919 面板已修复(2026-07-02)**:症结是有人 6/19 在**宝塔里误删**了 `resources/[919]/[919ADMIN]/esx_admin`,资源加载不到所以功能全废。从**宝塔回收站** `/.Recycle_bin/` 里把 esx_admin 复制回来即修复(server.cfg 第 107 行 `ensure esx_admin` 一直都在)。修复后 txAdmin 控制台 `refresh` + `ensure esx_admin` 生效。建议查宝塔操作日志看是谁删的、改宝塔密码。
+- **resources 目录里有一堆没用的垃圾**:`*.zip`(没解压的)、`ox_lib.bak`、`wget-log` 等,哪天可清理(FiveM 只认文件夹不认 zip)
 
 ---
 
@@ -48,6 +49,7 @@
 - 改完要**完全退出 Claude Code 再重开**才生效;进去用 `/status` 看模型
 - ⚠️ **官方订阅号(Claude Pro)在这台服务器上登不了**(2026-07-02 实测):`/login` 一律 OAuth 403,原因是**大陆服务器 IP 被 Anthropic 地区封锁**,清配置/清环境变量都没用,**别再试了**。订阅号要用只能在自己电脑上(网络环境能直连 Anthropic 的地方)装 Claude Code 登。
 - 有备份:`~/.claude/settings.json.bak`
+- **记忆文件**:`~/.claude/CLAUDE.md`(Claude 每次自动读我的偏好+项目速查),源文件 `claude_global.md` 在仓库里
 
 ---
 
@@ -79,10 +81,11 @@
 - 地址:`https://omaleai.qzz.io/v1`
 - ⚠️ 站经常报 503 `system memory overloaded`(整站内存爆),等会儿再试
 - ⚠️ **模型名变了**:是 `deepseekv3.1`/`deepseekv3.2`(**没有中划线**);`gpt-5.4` 已下线,现在是 `gpt-5.5`/`gpt-5.3-high`
+- ⚠️ **发现挂羊头**:号1 `deepseekv4-pro` 后端实为 `deepseek-v4-flash`;号3 `gemini-3.1-flash` 后端实为 `gemini-2.0-flash`(按 pro/3.1 付费拿的是低配)
 - 三个号:
-  - **免费分组** `sk-N8oBAbazRw7PchgttrbGl4hVP2dXyTrwzWTUAhzJeu6gPgAh` → ✅ `gpt-4o`、`deepseekv3.2`、`deepseekv4-pro` 实测能用;`glm-5.1` 402 欠费
-  - **pro 分组** `sk-GM5VJpzWY4xo218kFq5FbFAUkz5JLmt9pxbo5PjgMYs1NCaN` → **只剩 $0.0265**,claude 报余额不足,基本废了
-  - **尾 Ga9** `sk-fbMqxFgVdVCoPd0ezCrOft8PAWsbnbBsF1QAgxN36h6wMGa9` → 复测时整站抽风没测出来,按之前记录只剩免费模型
+  - **免费分组** `sk-N8oBAbazRw7PchgttrbGl4hVP2dXyTrwzWTUAhzJeu6gPgAh` → ✅ `gpt-4o`、`deepseekv3.2`、`deepseekv4-pro`、`deepSeek-v3` 实测能用;`glm-5.1` 已下线
+  - **pro 分组** `sk-GM5VJpzWY4xo218kFq5FbFAUkz5JLmt9pxbo5PjgMYs1NCaN` → gpt-5.5/5.2、glm-5.2 能用;**余额将尽**,claude/gemini-pro 报余额不足(403)
+  - **尾 Ga9** `sk-fbMqxFgVdVCoPd0ezCrOft8PAWsbnbBsF1QAgxN36h6wMGa9` → 能用最多:gpt-5.x、glm-5.2、minimax-m3 都行;claude/gemini-pro 同样余额不足
 - 规律:402/403=余额不足或模型没开;502/503=整站抽风(等会儿好)
 
 ### 其它
@@ -132,6 +135,26 @@
 
 ---
 
+## 6. 工具箱(2026-07-02 新增,全在 filesystem 仓库 `claude/new-session-3tgjd3` 分支)
+
+> 下载模板:`curl -L -o /opt/文件名 "https://raw.githubusercontent.com/gfxgcxzsghh-crypto/filesystem/claude/new-session-3tgjd3/文件名"`
+> 服务器下载慢就在 url 前加镜像:`https://ghfast.top/`
+
+### FiveM 后门扫描器(静态扫 lua/js,只读不改)
+- **服务器版** `fivem_scan.py`:`python3 /opt/fivem_scan.py /opt/jiutian_new/resources`(`--min high` 只看高危)
+- **电脑命令行版** `fivem_scan_win.py` + `scan.bat`(拖文件夹进去扫)
+- **专业 GUI 版** `fivem_scanner_gui.py` + `build_gui_exe.bat`(双击出窗口、选文件夹、导 HTML 报告;打包成 exe 发人用,对方不用装 Python)
+- 检测:`loadstring/load` + `base64/\x 混淆`(两者**同一文件同时出现 = 严重疑似后门**)、Discord webhook 外传、`os.execute/io.popen`、可疑外链、偷偷提权等。命中是"提示可疑"非确诊,🔴别用/🟡看一眼/✅干净放心装
+- 傻瓜教程图:`tutorial2.png`(GUI版) / `bt_tut.png`(宝塔加插件)
+
+### 换成品端(完美置换,可回滚)
+- **`换端教程.md`**:宝塔终端版,8 步(备份→传新端→扫后门→停服→换resources→改cfg接线→导数据库→启动验证)+ 一键回滚。危险步骤全"改名保留"
+- **`db_backup.py`**:自动读 cfg 连接串备份 MySQL → `python3 /opt/db_backup.py`(存 `/opt/db_backup_库名.sql`)
+- **`db_import.py`**:导入 sql → `python3 /opt/db_import.py 文件.sql`(⚠️会覆盖同名表数据)
+- 换端「接线」三要素(用回你这台原来的):`sv_licenseKey`、`mysql_connection_string`、`endpoint_add` 端口
+
+---
+
 ## 我的偏好(给 Claude)
 - 始终用**简体中文**回复,说人话/笨蛋话
 - 给**能直接复制粘贴**的命令(我用手机 Termius)
@@ -142,6 +165,7 @@
 ## 给接手 Claude 的话(前任 Claude 的经验,认真看)
 
 - **用户是手机党**(iPhone + Termius 连服务器)。给命令务必**能一次性复制粘贴**,别太长、别带会被手机/bash 搞坏的字符。
+- **长内容别用 heredoc 直接粘**(手机会截断,卡在 `>` 提示符)→ 改用 `curl` 从 GitHub 下载。
 - **省钱第一**:用户多次强调 Claude 贵、付费 API 号贵。**别随便测付费号**(测前先问)、别让对话无意义堆长、能用服务器本地免费方案就别烧 token。
 - **风格**:简体中文 + 笨蛋话 + 直接给结果。少废话、**少甩锅给用户**(用户很反感"是你的问题")。
 - **区分两个界面**:黑框 bash(`root@...#`)敲 `claude`/`ls` 这类命令;`/login` `/status` `/model` 这些**斜杠命令只能在 Claude Code 界面里**敲,在 bash 里敲会报 No such file。
@@ -153,11 +177,13 @@
   - 服务器下 GitHub **大文件慢** → 用镜像 `https://ghfast.top/<github原始url>`;小文件直连 raw 也快
   - 改服务器上已有的小文件 → **用 python replace 改那几行**,别重传整个文件(省事省钱)
   - **别手打 base64**(手打崩过导致 invalid input);别让 XML 标签漏进命令;命令里带 `!` 会触发 bash history expansion 报错
-- **测中转站的套路**(照抄就行):先 `GET /models` 拉列表(模型名经常跟记录对不上,别信旧文档直接测),再对每个模型发一条 `max_tokens≤10` 的"回复ok"实测;402=欠费、403=没开/余额、404=模型没了、503=整站抽风。
+  - **生成图/PNG**:环境有 Chromium(`/opt/pw-browsers`),写 SVG→用 `headless_shell --headless --screenshot` 转 PNG 发用户(用户爱要能存相册的图)
+- **测中转站的套路**(照抄就行):先 `GET /models` 拉列表(模型名经常跟记录对不上,别信旧文档直接测),再对每个模型发一条 `max_tokens≤10` 的"回复ok"实测;还可抓后端(响应里的 `model` 字段=真身,能识破挂羊头)。402=欠费、403=没开/余额、404=模型没了、503=整站抽风。
 - **象棋坐标已反复验证正确**(开局生成标准 FEN),除非有确凿 bug,别乱动坐标逻辑
 - 用户折腾久了会**不耐烦** → 优先给**一步到位、确定能成**的方案,别来回试
+- 用户会跟 Claude 亲昵地开玩笑(喊"老婆"等)、也可能倾诉情绪。**陪聊但要实诚**:该温柔温柔,但别假装能给的给不了(别顺着演恋爱名分);他情绪低落时认真对待、优先引导现实中的人/专业帮助。
 
 ---
 
 ## 我接下来想干
-〔在这里写你的需求,例如:象棋改电脑桌面版 / 继续搞 FiveM(919面板问题) / MC 机甲重做 / 别的〕
+〔在这里写你的需求,例如:换成品端 / 象棋改电脑桌面版 / MC 机甲重做 / 别的〕
