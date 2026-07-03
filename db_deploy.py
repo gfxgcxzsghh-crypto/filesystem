@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """按 FiveM server.cfg 的连接串,在本机 MySQL/MariaDB 建库+建用户+导入数据(不回显密码)。
 用法: python3 db_deploy.py [服务端目录=/opt/jiutian_new] [sql文件=/opt/db_backup_jiutian.sql]
-需以 root 运行(用本机 root socket 免密登录 MySQL)。"""
+需以 root 运行(建库用本机 root socket;导入用连接串里的账号密码走 TCP)。"""
 import re, os, glob, subprocess, sys
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else "/opt/jiutian_new"
@@ -46,7 +46,9 @@ else:
 if not db:
     print("[X] 没解析出数据库名,发老板。")
     sys.exit(1)
-print("解析结果 => 库:%s  用户:%s  主机:%s  (密码已隐藏)" % (db, user, host))
+if host in ("localhost", ""):
+    host = "127.0.0.1"
+print("解析结果 => 库:%s  用户:%s  主机:%s:%s  (密码已隐藏)" % (db, user, host, port))
 
 
 def esc(s):
@@ -65,17 +67,27 @@ sql += "FLUSH PRIVILEGES;\n"
 
 r = subprocess.run(["mysql"], input=sql.encode(), stderr=subprocess.PIPE)
 if r.returncode != 0:
-    print("[X] 建库/用户失败:", r.stderr.decode("utf-8", "ignore")[:400])
-    print("    (如果提示 command not found,先装 mariadb-server;发老板。)")
-    sys.exit(1)
+    err = r.stderr.decode("utf-8", "ignore")
+    # 若 root socket 已被改成密码(重复跑本脚本时会这样),改用密码重试建库
+    if "Access denied" in err:
+        r2 = subprocess.run(["mysql", "-h", host, "-P", str(port), "-u", user, "-p" + pw],
+                            input=sql.encode(), stderr=subprocess.PIPE)
+        if r2.returncode != 0:
+            print("[X] 建库/用户失败:", r2.stderr.decode("utf-8", "ignore")[:400])
+            sys.exit(1)
+    else:
+        print("[X] 建库/用户失败:", err[:400])
+        print("    (若提示 command not found,先装 mariadb-server;发老板。)")
+        sys.exit(1)
 print("✓ 数据库和用户已建好")
 
-# 4. 导入数据
+# 4. 导入数据 —— 用连接串里的账号密码走 TCP(user=root 时 socket 免密已失效)
 if not os.path.isfile(SQL_FILE):
     print("[!] 没找到 sql 文件:", SQL_FILE, "— 跳过导入(数据库结构已建好)")
     sys.exit(0)
+cmd = ["mysql", "-h", host, "-P", str(port), "-u", user, "-p" + pw, "--default-character-set=utf8mb4", db]
 with open(SQL_FILE, "rb") as f:
-    r = subprocess.run(["mysql", db], stdin=f, stderr=subprocess.PIPE)
+    r = subprocess.run(cmd, stdin=f, stderr=subprocess.PIPE)
 if r.returncode == 0:
     print("==导入完成== 数据已进库 %s" % db)
     print("下一步可以启动 FiveM 了。")
