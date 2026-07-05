@@ -165,6 +165,21 @@ for k in KEYS:
         mine[k] = mm.group(0).strip()
 
 if new_cfg:
+    # 成品端常把配置拆成多个 .cfg(server.cfg 里 exec server_plugin.cfg 等),
+    # 把 server.cfg 同目录的其它 .cfg 一并搬过来,否则起服报缺文件。
+    ncdir = os.path.dirname(new_cfg)
+    moved = 0
+    for fn in os.listdir(ncdir):
+        if fn.lower().endswith(".cfg") and fn.lower() != "server.cfg":
+            dst = os.path.join(LIVE, fn)
+            if os.path.isfile(dst):
+                shutil.copy(dst, dst + ".OLD")
+            shutil.copy(os.path.join(ncdir, fn), dst)
+            moved += 1
+    if moved:
+        subprocess.run("chown www:www %s/*.cfg" % LIVE, shell=True,
+                       stderr=subprocess.DEVNULL)
+        print("   ✓ 一并搬了 %d 个附属 cfg(server_plugin/target/inventory 等)" % moved)
     txt = open(new_cfg, encoding="utf-8", errors="ignore").read()
     for k, line in mine.items():
         pat = re.compile(r'^\s*(?:set[r]?\s+)?%s\s+.*$' % re.escape(k), re.M)
