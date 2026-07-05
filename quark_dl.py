@@ -13,10 +13,53 @@ if not os.path.isfile(CK_FILE):
     print("[X] 没有 cookie 文件 %s" % CK_FILE)
     print("    用宝塔在 /opt 新建 quark_cookie.txt,把 Cookie-Editor 导出的 cookie 粘进去保存。")
     sys.exit(1)
-COOKIE = " ".join(open(CK_FILE, encoding="utf-8", errors="ignore").read().split())
-if len(COOKIE) < 20:
-    print("[X] cookie 太短/是空的,重新导出粘贴。")
+
+
+def build_cookie(raw):
+    """兼容三种导出格式: Header String / JSON(As JSON) / Netscape(As Netscape)。
+    只挑出夸克相关域名的 cookie,拼成 'name=value; ...' 的 Cookie 头。"""
+    raw = raw.strip()
+
+    def wanted(dom):
+        dom = (dom or "").lower()
+        return ("quark" in dom) or ("sm.cn" in dom)
+
+    # JSON 导出(cookie 对象数组)
+    if raw[:1] in ("[", "{"):
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                obj = obj.get("cookies") or obj.get("data") or []
+            hit = ["%s=%s" % (c.get("name"), c.get("value"))
+                   for c in obj if isinstance(c, dict) and wanted(c.get("domain"))]
+            if hit:
+                return "; ".join(hit)
+            allp = ["%s=%s" % (c.get("name"), c.get("value"))
+                    for c in obj if isinstance(c, dict) and c.get("name")]
+            if allp:
+                return "; ".join(allp)
+        except Exception:
+            pass
+    # Netscape 导出(制表符分隔,每行 7 段)
+    if "\t" in raw:
+        hit = []
+        for line in raw.splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            p = line.split("\t")
+            if len(p) >= 7 and wanted(p[0]):
+                hit.append("%s=%s" % (p[5], p[6]))
+        if hit:
+            return "; ".join(hit)
+    # 已经是 Header String(name=value; ...)
+    return " ".join(raw.split())
+
+
+COOKIE = build_cookie(open(CK_FILE, encoding="utf-8", errors="ignore").read())
+if len(COOKIE) < 20 or "=" not in COOKIE:
+    print("[X] 没从文件里挑出有效的夸克 cookie。确认导的是登录状态、且选了 As JSON/Netscape。")
     sys.exit(1)
+print("已读取 cookie(%d 字符)" % len(COOKIE))
 
 HDR = {
     "Cookie": COOKIE,
