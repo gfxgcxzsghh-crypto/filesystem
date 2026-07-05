@@ -74,17 +74,28 @@ BASE = "https://drive-pc.quark.cn/1/clouddrive"
 COMMON = "pr=ucpro&fr=pc&uc_param_str="
 
 
+import urllib.error
+
+
+def _open(req):
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "ignore")
+        try:
+            return json.loads(body)   # 夸克即使 400 也会返回 JSON 错误信息
+        except Exception:
+            return {"_http": e.code, "_raw": body[:500]}
+
+
 def api_get(path):
-    req = urllib.request.Request(BASE + path, headers=HDR)
-    with urllib.request.urlopen(req, timeout=40) as r:
-        return json.loads(r.read().decode("utf-8"))
+    return _open(urllib.request.Request(BASE + path, headers=HDR))
 
 
 def api_post(path, body):
     data = json.dumps(body).encode()
-    req = urllib.request.Request(BASE + path, data=data, headers=HDR, method="POST")
-    with urllib.request.urlopen(req, timeout=40) as r:
-        return json.loads(r.read().decode("utf-8"))
+    return _open(urllib.request.Request(BASE + path, data=data, headers=HDR, method="POST"))
 
 
 def human(n):
@@ -104,7 +115,8 @@ if len(sys.argv) >= 3:
     try:
         url = r["data"][0]["download_url"]
     except Exception:
-        print("[X] 没拿到下载地址,返回:", json.dumps(r)[:300])
+        print("[X] 没拿到下载地址。夸克返回(截图发老板):")
+        print(json.dumps(r, ensure_ascii=False)[:700])
         sys.exit(1)
     print("✓ 地址已拿到,开始下载 -> /opt/%s" % name)
     # 装 aria2(多线程,快);没有就用 wget
